@@ -1,0 +1,27 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "PlaybookName": {
+            "value": "Get-SecureScore-Information"
+        },
+        "application_ID": {
+            "value": "Enter your application ID here"
+        },
+        "application_secret": {
+            "value": "Enter your application secret here"
+        },
+        "Tenant_ID": {
+            "value": "Enter your tenant ID here"
+        },
+        "LogAnalyticsWorkspaceID": {
+            "value": "Enter your Workspace ID here"
+        },
+        "LogAnalyticsWorkspaceKey": {
+            "value": "Enter your Workspace Key here"
+        },
+        "UserName": {
+            "value": "<username>@<domain>"
+        }
+    }
+}

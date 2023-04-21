@@ -1,0 +1,1010 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "",
+        "description": "",
+        "prerequisites": "",
+        "postDeployment": [],
+        "prerequisitesDeployTemplateFile": "",
+        "lastUpdateTime": "",
+        "entities": [],
+        "tags": [],
+        "support": {
+            "tier": "community",
+            "armtemplate": "Generated from https://github.com/Azure/Azure-Sentinel/tree/master/Tools/Playbook-ARM-Template-Generator"
+        },
+        "author": {
+            "name": "Jake Derkowski"
+        }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "Enrich-Incidents",
+            "type": "string"
+        },
+        "VirusTotal API Key": {
+            "type": "string",
+            "metadata": {
+                "description": "Enter value for VirusTotal API Key"
+            }
+        }
+    },
+    "variables": {
+        "AzureloganalyticsdatacollectorConnectionName": "[concat('Azureloganalyticsdatacollector-', parameters('PlaybookName'))]",
+        "MicrosoftSentinelConnectionName": "[concat('MicrosoftSentinel-', parameters('PlaybookName'))]",
+        "VirustotalConnectionName": "[concat('Virustotal-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "properties": {
+                "provisioningState": "Succeeded",
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "VirusTotal API Key": {
+                            "defaultValue": "[parameters('VirusTotal API Key')]",
+                            "type": "string"
+                        }
+                    },
+                    "triggers": {
+                        "Microsoft_Sentinel_incident": {
+                            "type": "ApiConnectionWebhook",
+                            "inputs": {
+                                "body": {
+                                    "callback_url": "@{listCallbackUrl()}"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "path": "/incident-creation"
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Check_for_Domains": {
+                            "actions": {
+                                "For_each_5": {
+                                    "foreach": "@body('Entities_-_Get_DNS')?['Dnsresolutions']",
+                                    "actions": {
+                                        "Add_comment_to_incident_(V3)_5": {
+                                            "runAfter": {
+                                                "Create_DNS_stats_table": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>Virus Total File Report found for @{items('For_each_5')?['DomainName']}<br>\n@{body('Create_DNS_stats_table')}<br>\n<br>\nQuery: VTURLReport_CL | where id_s == \"@{items('For_each_5')?['DomainName']}\"</p>"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Create_DNS_stats_table": {
+                                            "runAfter": {
+                                                "VTURLReport_3": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(body('Get_Domain_report_2')?['data']?['attributes']?['last_analysis_stats'])"
+                                            }
+                                        },
+                                        "Get_Domain_report_2": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['virustotal']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/api/v3/domains/@{encodeURIComponent(items('For_each_5')?['DomainName'])}"
+                                            }
+                                        },
+                                        "Store_maliciousScore_5": {
+                                            "runAfter": {
+                                                "Get_Domain_report_2": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "MaliciousScore",
+                                                "value": "@body('Get_Domain_report_2')?['data']?['attributes']?['last_analysis_stats']?['malicious']"
+                                            }
+                                        },
+                                        "VTURLReport_3": {
+                                            "runAfter": {
+                                                "Store_maliciousScore_5": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@{body('Get_Domain_report_2')?['data']}",
+                                                "headers": {
+                                                    "Log-Type": "VTURLReport",
+                                                    "time-generated-field": "@{utcNow()}"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/api/logs"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Entities_-_Get_DNS": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(body('Entities_-_Get_DNS')?['Dnsresolutions'])",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Check_for_Hosts": {
+                            "actions": {
+                                "For_each_Host": {
+                                    "foreach": "@body('Entities_-_Get_Hosts')?['Hosts']",
+                                    "actions": {
+                                        "Add_comment_to_incident_(V3)_4": {
+                                            "runAfter": {
+                                                "Create_Host_stats_table": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>Virus Total File Report found for @{items('For_each_Host')?['DnsDomain']}<br>\nReputation: @{body('Get_Domain_report')?['data']?['attributes']?['reputation']}<br>\nMalicious: @{body('Get_Domain_report')?['data']?['attributes']?['total_votes']?['malicious']}<br>\nHarmless: @{body('Get_Domain_report')?['data']?['attributes']?['total_votes']?['harmless']}<br>\n<br>\n@{body('Create_Host_stats_table')}<br>\n<br>\nQuery: VTURLReport_CL | where id_s == \"@{items('For_each_Host')?['DnsDomain']}\"</p>"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Create_Host_stats_table": {
+                                            "runAfter": {
+                                                "VTURLReport_2": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(body('Get_Domain_report')?['data']?['attributes']?['last_analysis_stats'])"
+                                            }
+                                        },
+                                        "Get_Domain_report": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['virustotal']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/api/v3/domains/@{encodeURIComponent(items('For_each_Host')?['DnsDomain'])}"
+                                            }
+                                        },
+                                        "Store_maliciousScore_4": {
+                                            "runAfter": {
+                                                "Get_Domain_report": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "MaliciousScore",
+                                                "value": "@body('Get_Domain_report')?['data']?['attributes']?['last_analysis_stats']?['malicious']"
+                                            }
+                                        },
+                                        "VTURLReport_2": {
+                                            "runAfter": {
+                                                "Store_maliciousScore_4": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@{body('Get_Domain_report')?['data']}",
+                                                "headers": {
+                                                    "Log-Type": "VTURLReport",
+                                                    "time-generated-field": "@{utcNow()}"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/api/logs"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Entities_-_Get_Hosts": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(body('Entities_-_Get_Hosts')?['Hosts'])",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Check_for_IPs": {
+                            "actions": {
+                                "Filter_address": {
+                                    "runAfter": {},
+                                    "type": "Query",
+                                    "inputs": {
+                                        "from": "@body('Entities_-_Get_IPs')?['IPs']",
+                                        "where": "@equals(item()?['Type'], 'ip')"
+                                    }
+                                },
+                                "For_each_IP": {
+                                    "foreach": "@body('Filter_address')",
+                                    "actions": {
+                                        "Add_IP_location_tags": {
+                                            "runAfter": {
+                                                "Parse_GeoIP_data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "tagsToAdd": {
+                                                        "TagsToAdd": [
+                                                            {
+                                                                "Tag": "@variables('Sanitized IP')"
+                                                            },
+                                                            {
+                                                                "Tag": "@body('Parse_GeoIP_data')?['city']"
+                                                            },
+                                                            {
+                                                                "Tag": "@body('Parse_GeoIP_data')?['country']"
+                                                            },
+                                                            {
+                                                                "Tag": "@body('Parse_GeoIP_data')?['region']"
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "put",
+                                                "path": "/Incidents"
+                                            }
+                                        },
+                                        "Comment_IP_data": {
+                                            "runAfter": {
+                                                "Create_Last_analysis_stats_table": [
+                                                    "Succeeded",
+                                                    "Failed"
+                                                ],
+                                                "GEO_Table": [
+                                                    "Succeeded",
+                                                    "Failed"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>Geolocation: @{variables('Sanitized IP')}<br>\n@{body('GEO_Table')}<br>\n<br>\n<br>\nVirusTotal Statistics: @{variables('Sanitized IP')}<br>\n@{body('Create_Last_analysis_stats_table')}<br>\n</p>"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Create_Last_analysis_stats_table": {
+                                            "runAfter": {
+                                                "Set_variable": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(body('Get_an_IP_report_')?['data']?['attributes']?['last_analysis_stats'])"
+                                            }
+                                        },
+                                        "Fix_IPv6": {
+                                            "actions": {
+                                                "Set_Sanitized_IP_2": {
+                                                    "runAfter": {},
+                                                    "type": "SetVariable",
+                                                    "inputs": {
+                                                        "name": "Sanitized IP",
+                                                        "value": "@{slice(items('For_each_IP')?['Address'], indexOf(items('For_each_IP')?['Address'], '['), indexOf(items('For_each_IP')?['Address'], ']'))}"
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "else": {
+                                                "actions": {
+                                                    "Set_Sanitized_IP": {
+                                                        "runAfter": {},
+                                                        "type": "SetVariable",
+                                                        "inputs": {
+                                                            "name": "Sanitized IP",
+                                                            "value": "@items('For_each_IP')?['Address']"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "contains": [
+                                                            "@items('For_each_IP')?['Address']",
+                                                            "["
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "type": "If"
+                                        },
+                                        "GEO_JSON": {
+                                            "runAfter": {
+                                                "Parse_GeoIP_data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Compose",
+                                            "inputs": {
+                                                "AS": "@{body('Parse_GeoIP_data')?['as']}",
+                                                "City": "@{body('Parse_GeoIP_data')?['city']}",
+                                                "Country": "@{body('Parse_GeoIP_data')?['country']}",
+                                                "ISP": "@{body('Parse_GeoIP_data')?['isp']}",
+                                                "ORG": "@{body('Parse_GeoIP_data')?['org']}",
+                                                "Region": "@{body('Parse_GeoIP_data')?['region']}"
+                                            }
+                                        },
+                                        "GEO_Table": {
+                                            "runAfter": {
+                                                "GEO_JSON": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(outputs('GEO_JSON'))"
+                                            }
+                                        },
+                                        "Get_an_IP_report_": {
+                                            "runAfter": {
+                                                "Fix_IPv6": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['virustotal']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/api/v3/ip_addresses/connectorV2/@{encodeURIComponent(variables('Sanitized IP'))}"
+                                            }
+                                        },
+                                        "HTTP": {
+                                            "runAfter": {
+                                                "Fix_IPv6": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Http",
+                                            "inputs": {
+                                                "method": "GET",
+                                                "uri": "http://ip-api.com/json/@{variables('Sanitized IP')}"
+                                            }
+                                        },
+                                        "Parse_GeoIP_data": {
+                                            "runAfter": {
+                                                "HTTP": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('HTTP')",
+                                                "schema": {
+                                                    "properties": {
+                                                        "as": {
+                                                            "type": "string"
+                                                        },
+                                                        "city": {
+                                                            "type": "string"
+                                                        },
+                                                        "country": {
+                                                            "type": "string"
+                                                        },
+                                                        "countryCode": {
+                                                            "type": "string"
+                                                        },
+                                                        "isp": {
+                                                            "type": "string"
+                                                        },
+                                                        "lat": {
+                                                            "type": "number"
+                                                        },
+                                                        "lon": {
+                                                            "type": "number"
+                                                        },
+                                                        "org": {
+                                                            "type": "string"
+                                                        },
+                                                        "query": {
+                                                            "type": "string"
+                                                        },
+                                                        "region": {
+                                                            "type": "string"
+                                                        },
+                                                        "regionName": {
+                                                            "type": "string"
+                                                        },
+                                                        "status": {
+                                                            "type": "string"
+                                                        },
+                                                        "timezone": {
+                                                            "type": "string"
+                                                        },
+                                                        "zip": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            }
+                                        },
+                                        "Send_Data_2_VTIPReport": {
+                                            "runAfter": {
+                                                "Create_Last_analysis_stats_table": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@{body('Get_an_IP_report_')?['data']}",
+                                                "headers": {
+                                                    "Log-Type": "VTIPReport",
+                                                    "time-generated-field": "@{utcNow()}"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/api/logs"
+                                            }
+                                        },
+                                        "Set_variable": {
+                                            "runAfter": {
+                                                "Get_an_IP_report_": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "MaliciousScore",
+                                                "value": "@body('Get_an_IP_report_')?['data']?['attributes']?['total_votes']?['malicious']"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Filter_address": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Entities_-_Get_IPs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(body('Entities_-_Get_IPs')?['IPs'])",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Check_for_Urls": {
+                            "actions": {
+                                "For_each": {
+                                    "foreach": "@body('Entities_-_Get_URLs')?['URLs']",
+                                    "actions": {
+                                        "Add_comment_to_incident_(V3)": {
+                                            "runAfter": {
+                                                "Create_Url_STATS_table": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>Title: <br>\nUrl: <br>\nCategories: <br>\n@{body('Create_Url_STATS_table')}</p>"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Create_Url_STATS_table": {
+                                            "runAfter": {
+                                                "VTURLReport": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(body('Get_URL_report')?['data']?['attributes']?['last_analysis_stats'])"
+                                            }
+                                        },
+                                        "Get_URL_report": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['virustotal']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/api/v3/urls/@{encodeURIComponent(items('For_each')?['Url'])}"
+                                            }
+                                        },
+                                        "Store_maliciousScore_": {
+                                            "runAfter": {
+                                                "Get_URL_report": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "MaliciousScore",
+                                                "value": "@body('Get_URL_report')?['data']?['attributes']?['last_analysis_stats']?['malicious']"
+                                            }
+                                        },
+                                        "VTURLReport": {
+                                            "runAfter": {
+                                                "Store_maliciousScore_": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@{body('Get_URL_report')}",
+                                                "headers": {
+                                                    "Log-Type": "VTURLReport",
+                                                    "time-generated-field": "@{utcNow()}"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/api/logs"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Entities_-_Get_URLs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(body('Entities_-_Get_URLs')?['URLs'])",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Check_for_files": {
+                            "actions": {
+                                "For_each_file": {
+                                    "foreach": "@body('Entities_-_Get_FileHashes')?['Filehashes']",
+                                    "actions": {
+                                        "Add_comment_to_incident_(V3)_2": {
+                                            "runAfter": {
+                                                "Create_File_Stats_table": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>File name: @{body('Get_file_report')?['data']?['attributes']?['names']}<br>\nHash (SHA 256): @{body('Get_file_report')?['data']?['attributes']?['sha256']}<br>\n@{body('Create_File_Stats_table')}<br>\n</p>"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Create_File_Stats_table": {
+                                            "runAfter": {
+                                                "VTFileReport": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Table",
+                                            "inputs": {
+                                                "format": "HTML",
+                                                "from": "@createArray(body('Get_file_report')?['data']?['attributes']?['last_analysis_stats'])"
+                                            }
+                                        },
+                                        "Get_file_report": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['virustotal']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/api/v3/files/connectorV2/@{encodeURIComponent(items('For_each_file')?['Value'])}"
+                                            }
+                                        },
+                                        "Store_maliciousScore_2_": {
+                                            "runAfter": {
+                                                "Get_file_report": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "MaliciousScore",
+                                                "value": "@body('Get_file_report')?['data']?['attributes']?['last_analysis_stats']?['malicious']"
+                                            }
+                                        },
+                                        "VTFileReport": {
+                                            "runAfter": {
+                                                "Store_maliciousScore_2_": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@{body('Get_file_report')?['data']}",
+                                                "headers": {
+                                                    "Log-Type": "VTFileReport",
+                                                    "time-generated-field": "@{utcNow()}"
+                                                },
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/api/logs"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Entities_-_Get_FileHashes": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(body('Entities_-_Get_FileHashes')?['Filehashes'])",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Entities_-_Get_DNS": {
+                            "runAfter": {
+                                "Initialize_MaliciousScore": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/entities/dnsresolution"
+                            }
+                        },
+                        "Entities_-_Get_FileHashes": {
+                            "runAfter": {
+                                "Initialize_MaliciousScore": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/entities/filehash"
+                            }
+                        },
+                        "Entities_-_Get_Hosts": {
+                            "runAfter": {
+                                "Initialize_MaliciousScore": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/entities/host"
+                            }
+                        },
+                        "Entities_-_Get_IPs": {
+                            "runAfter": {
+                                "Initialize_variable": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/entities/ip"
+                            }
+                        },
+                        "Entities_-_Get_URLs": {
+                            "runAfter": {
+                                "Initialize_MaliciousScore": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/entities/url"
+                            }
+                        },
+                        "Initialize_MaliciousScore": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "MaliciousScore",
+                                        "type": "integer"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable": {
+                            "runAfter": {
+                                "Initialize_MaliciousScore": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Sanitized IP",
+                                        "type": "string"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azureloganalyticsdatacollector": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('AzureloganalyticsdatacollectorConnectionName'))]",
+                                "connectionName": "[variables('AzureloganalyticsdatacollectorConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azureloganalyticsdatacollector')]"
+                            },
+                            "azuresentinel": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                                "connectionName": "[variables('MicrosoftSentinelConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            },
+                            "virustotal": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('VirustotalConnectionName'))]",
+                                "connectionName": "[variables('VirustotalConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Virustotal')]"
+                            }
+                        }
+                    }
+                }
+            },
+            "name": "[parameters('PlaybookName')]",
+            "type": "Microsoft.Logic/workflows",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "Type": "Enrichment",
+                "fix": "Enrich ipv6",
+                "hidden-SentinelTemplateName": "Enrich-Incidents",
+                "hidden-SentinelTemplateVersion": "1.0"
+            },
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "apiVersion": "2017-07-01",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('AzureloganalyticsdatacollectorConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('VirustotalConnectionName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('AzureloganalyticsdatacollectorConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('AzureloganalyticsdatacollectorConnectionName')]",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azureloganalyticsdatacollector')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('MicrosoftSentinelConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('MicrosoftSentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('VirustotalConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('VirustotalConnectionName')]",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Virustotal')]"
+                }
+            }
+        }
+    ]
+}

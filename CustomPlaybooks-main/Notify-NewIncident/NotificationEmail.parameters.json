@@ -1,0 +1,18 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "PlaybookName": {
+            "value": "Notify-NewIncident"
+        },
+        "Company Name": {
+            "value": "Company" 
+        },
+        "Company logo link": {
+            "value": "https://azure.microsoft.com/svghandler/azure-sentinel"
+        },
+        "Report name": {
+            "value": "CompanyName SOC" 
+        }
+    }
+}
